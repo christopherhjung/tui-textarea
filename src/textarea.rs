@@ -8,12 +8,13 @@ use crate::ratatui::widgets::{Block, Widget};
 use crate::scroll::Scrolling;
 #[cfg(feature = "search")]
 use crate::search::Search;
-use crate::util::{spaces, Pos};
+use crate::util::{spaces, Pos, num_digits};
 use crate::widget::{Renderer, Viewport};
 use crate::word::{find_word_end_forward, find_word_start_backward};
 #[cfg(feature = "ratatui")]
 use ratatui::text::Line;
 use std::cmp::Ordering;
+use ratatui::layout::Rect;
 #[cfg(feature = "tuirs")]
 use tui::text::Spans as Line;
 use unicode_width::UnicodeWidthChar as _;
@@ -85,6 +86,7 @@ pub struct TextArea<'a> {
     history: History,
     cursor_line_style: Style,
     line_number_style: Option<Style>,
+    cursor_line_number_style: Option<Style>,
     pub(crate) viewport: Viewport,
     cursor_style: Style,
     yank: YankText,
@@ -190,6 +192,7 @@ impl<'a> TextArea<'a> {
             history: History::new(50),
             cursor_line_style: Style::default().add_modifier(Modifier::UNDERLINED),
             line_number_style: None,
+            cursor_line_number_style: None,
             viewport: Viewport::default(),
             cursor_style: Style::default().add_modifier(Modifier::REVERSED),
             yank: YankText::default(),
@@ -1567,7 +1570,15 @@ impl<'a> TextArea<'a> {
         );
 
         if let Some(style) = self.line_number_style {
-            hl.line_number(row, lnum_len, style);
+            if let Some(cursor_style) = self.cursor_line_number_style {
+                if row == self.cursor.0{
+                    hl.line_number(row, lnum_len, cursor_style);
+                }else{
+                    hl.line_number(row, lnum_len, style);
+                }
+            }else{
+                hl.line_number(row, lnum_len, style);
+            }
         }
 
         if row == self.cursor.0 {
@@ -1790,8 +1801,12 @@ impl<'a> TextArea<'a> {
     /// textarea.set_line_number_style(style);
     /// assert_eq!(textarea.line_number_style(), Some(style));
     /// ```
+    ///
     pub fn set_line_number_style(&mut self, style: Style) {
         self.line_number_style = Some(style);
+    }
+    pub fn set_cursor_line_number_style(&mut self, style: Style) {
+        self.cursor_line_number_style = Some(style);
     }
 
     /// Remove the style of line number which was set by [`TextArea::set_line_number_style`]. After calling this
@@ -2000,6 +2015,23 @@ impl<'a> TextArea<'a> {
     /// ```
     pub fn cursor(&self) -> (usize, usize) {
         self.cursor
+    }
+
+    pub fn screen_pos(&self, area: Rect) -> (u16, u16) {
+        let (row, col) = self.cursor;
+        let (row_view, col_view, _, _) = self.viewport.rect();
+        let Rect{x: col_offset, y: row_offset, ..} = area;
+
+        let col_offset = match self.line_number_style {
+            Some(_) => {
+                let lines_len = self.lines().len();
+                let lnum_len = num_digits(lines_len);
+                col_offset + 2 + lnum_len as u16
+            },
+            None => col_offset
+        };
+
+        (col as u16 - col_view + col_offset, row as u16 - row_view + row_offset)
     }
 
     /// Set text alignment. When [`Alignment::Center`] or [`Alignment::Right`] is set, line number is automatically
